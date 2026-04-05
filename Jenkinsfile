@@ -81,7 +81,7 @@ spec:
             sh """
               set -eux
 
-              SHORT_SHA=$(echo "$GIT_COMMIT" | cut -c1-7)
+              SHORT_SHA=\$(echo "$GIT_COMMIT" | cut -c1-7)
 
               mkdir -p "$XDG_RUNTIME_DIR" "$WORKSPACE/.docker"
 
@@ -136,7 +136,7 @@ EOF
             sh """
               set -eux
 
-              IMAGE_TAG=$(cat image-tag.txt)
+              IMAGE_TAG=\$(cat image-tag.txt)
 
               rm -rf gitops
               git clone https://${GIT_USER}:${GIT_PASS}@github.com/2085875766/demo-gitops.git gitops
