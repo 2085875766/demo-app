@@ -1,5 +1,11 @@
 pipeline {
-  agent any
+  agent {
+    kubernetes {
+      cloud 'kubernetes'
+      namespace 'cicd'
+      defaultContainer 'jnlp'
+    }
+  }
 
   environment {
     APP_NAME = "myapp"
@@ -19,53 +25,58 @@ pipeline {
 
     stage('Test') {
       steps {
-        sh '''
-          echo "Running tests..."
-          npm install
-          npm test
-        '''
+        container('node') {
+          sh '''
+            npm install
+            npm test
+          '''
+        }
       }
     }
 
     stage('Build & Push') {
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'harbor-robot',
-          usernameVariable: 'HARBOR_USER',
-          passwordVariable: 'HARBOR_PASS'
-        )]) {
-          sh '''
-            set -eux
-            SHORT_SHA=$(git rev-parse --short HEAD)
-            echo "Building image: ${IMAGE_REPO}:${SHORT_SHA}"
-            docker build -t ${IMAGE_REPO}:${SHORT_SHA} .
-            echo "${HARBOR_PASS}" | docker login ${REGISTRY} -u "${HARBOR_USER}" --password-stdin
-            docker push ${IMAGE_REPO}:${SHORT_SHA}
-            echo ${SHORT_SHA} > image-tag.txt
-          '''
+        container('docker') {
+          withCredentials([usernamePassword(
+            credentialsId: 'harbor-robot',
+            usernameVariable: 'HARBOR_USER',
+            passwordVariable: 'HARBOR_PASS'
+          )]) {
+            sh '''
+              # 等待 Docker 守护进程启动
+              while ! docker info 2>/dev/null; do
+                echo "Waiting for Docker daemon..."
+                sleep 2
+              done
+
+              docker build -t ${IMAGE_REPO}:latest .
+              echo ${HARBOR_PASS} | docker login ${REGISTRY} -u ${HARBOR_USER} --password-stdin
+              docker push ${IMAGE_REPO}:latest
+            '''
+          }
         }
       }
     }
 
     stage('Update GitOps Repo') {
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'gitops-pat',
-          usernameVariable: 'GIT_USER',
-          passwordVariable: 'GIT_PASS'
-        )]) {
-          sh '''
-            set -eux
-            IMAGE_TAG=$(cat image-tag.txt)
-            git clone https://${GIT_USER}:${GIT_PASS}@github.com/2085875766/demo-gitops.git gitops
-            cd gitops/charts/myapp
-            sed -i "s|tag:.*|tag: ${IMAGE_TAG}|g" values.yaml
-            git config user.email "jenkins@lab.local"
-            git config user.name "jenkins"
-            git add values.yaml
-            git commit -m "Update image tag to ${IMAGE_TAG}" || true
-            git push origin main
-          '''
+        container('jnlp') {
+          withCredentials([usernamePassword(
+            credentialsId: 'gitops-pat',
+            usernameVariable: 'GIT_USER',
+            passwordVariable: 'GIT_PASS'
+          )]) {
+            sh '''
+              git clone https://${GIT_USER}:${GIT_PASS}@github.com/2085875766/demo-gitops.git gitops
+              cd gitops/charts/myapp
+              sed -i "s|tag:.*|tag: latest|g" values.yaml
+              git config user.email "jenkins@lab.local"
+              git config user.name "jenkins"
+              git add values.yaml
+              git commit -m "Update image tag to latest" || true
+              git push origin main
+            '''
+          }
         }
       }
     }
